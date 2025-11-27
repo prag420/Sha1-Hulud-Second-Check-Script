@@ -812,19 +812,31 @@ EOF
 
 FOUND=0
 
-while IFS= read -r badpkg || [[ -n $badpkg ]]; do
-    [[ -z "$badpkg" ]] && continue
+# Build a single regex pattern from all packages for one grep pass. Example: package1|package2|package3
+pattern=$(echo "$BLOCKLIST" | sed '/^$/d' | sed 's/[.^$*+?()[\]{}|]/\\&/g' | paste -sd '|' -)
 
-    # Search only for lines that look like real dependencies:  "badpkg": "version"
-    matches=$(grep -R --include="package.json" -F "\"$badpkg\":" . 2>/dev/null || true)
+# Single grep pass across all package.json files
+matches=$(grep -R --include="package.json" -E "\"($pattern)\":" . 2>/dev/null || true)
 
-    if [[ -n "$matches" ]]; then
-        echo "DANGEROUS PACKAGE DETECTED → \"$badpkg\""
-        echo "$matches" | sed 's/^/    in → /'
-        echo
-        FOUND=1
-    fi
-done <<< "$BLOCKLIST"
+if [[ -n "$matches" ]]; then
+    echo "DANGEROUS PACKAGES DETECTED:"
+    echo "============================================================"
+    
+    # Extract and display each unique package found
+    while IFS= read -r line; do
+        # Extract package name from the line
+        pkg=$(echo "$line" | grep -oE "\"[^\"]+\":" | head -1 | tr -d '":')
+        file=$(echo "$line" | cut -d: -f1)
+        
+        if [[ -n "$pkg" ]]; then
+            echo "→ \"$pkg\""
+            echo "    in → $file"
+            echo
+        fi
+    done <<< "$matches"
+    
+    FOUND=1
+fi
 
 if [[ $FOUND -eq 0 ]]; then
     echo "All clear! No known malicious or hijacked packages found in any package.json"
